@@ -1,0 +1,996 @@
+var garglerTrainerV1 = {};
+
+// ==========================
+//      GLOBAL STATE
+// ==========================
+
+var gt_window           = null;
+var gt_activeTab        = 'vehicles';
+var gt_isFreeMode       = false;
+var gt_weaponCheckTimer = null;
+
+// Feature flags
+var gt_vehicleGodMode       = false;
+var gt_playerGodMode        = false;
+var gt_disableCops          = false;
+var gt_speedBoostEnabled    = false;
+var gt_spawnProtectionOn    = false;
+var gt_infiniteAmmo         = false;
+var gt_noReload             = false;
+var gt_fastRun              = false;
+var gt_superJump            = false;
+var gt_noRagdoll            = false;
+
+// World controls
+var gt_timeFrozen           = false;
+var gt_timeOfDay            = 12; // 0-23
+var gt_savedLocations       = [];
+
+// Last spawned vehicle
+var gt_lastVehicle          = null;
+var gt_spawnProtectionTimer = null;
+
+// ==========================
+//      UTILITY HELPERS
+// ==========================
+
+function gt_showMessage(text) {
+    try {
+        natives.printStringWithLiteralStringNow('STRING', text, 3000, true);
+    } catch (e) {
+        // ignore
+    }
+}
+
+function gt_getPosInFrontOfPlayer(distance) {
+    try {
+        if (!localPlayer || !localPlayer.position) return null;
+        var pos     = localPlayer.position;
+        var heading = localPlayer.heading;
+        var x = pos.x + distance * Math.cos(heading);
+        var y = pos.y + distance * Math.sin(heading);
+        var z = pos.z;
+        return new Vec3(x, y, z);
+    } catch (e) {
+        gt_showMessage('Failed to calculate front position');
+        return null;
+    }
+}
+
+function gt_getPlayerVehicle(attempts, maxAttempts, delay, cb) {
+    if (attempts > maxAttempts) {
+        try {
+            if (localPlayer && !natives.isCharInAnyCar(localPlayer)) {
+                gt_showMessage('Not in a vehicle');
+            } else {
+                gt_showMessage('Cannot detect vehicle');
+            }
+        } catch (e) {}
+        cb(null);
+        return;
+    }
+
+    try {
+        if (!localPlayer) {
+            setTimeout(function() {
+                gt_getPlayerVehicle(attempts + 1, maxAttempts, delay, cb);
+            }, delay);
+            return;
+        }
+
+        if (localPlayer.vehicle && natives.doesVehicleExist(localPlayer.vehicle) && natives.isCharInAnyCar(localPlayer)) {
+            cb(localPlayer.vehicle);
+            return;
+        }
+
+        setTimeout(function() {
+            gt_getPlayerVehicle(attempts + 1, maxAttempts, delay, cb);
+        }, delay);
+    } catch (e) {
+        setTimeout(function() {
+            gt_getPlayerVehicle(attempts + 1, maxAttempts, delay, cb);
+        }, delay);
+    }
+}
+
+function gt_createVehicle(hash, position, sync) {
+    try {
+        if (!natives.isModelInCdimage(hash)) {
+            gt_showMessage('Model ' + hash + ' not in CD image');
+            return null;
+        }
+
+        natives.requestModel(hash);
+        natives.loadAllObjectsNow();
+
+        var veh = natives.createCar(hash, position, sync);
+        if (!veh) {
+            gt_showMessage('Failed to spawn model ' + hash);
+            return null;
+        }
+
+        // Spawn protection
+        if (gt_spawnProtectionOn) {
+            try {
+                natives.setCarCanBeDamaged(veh, false);
+                gt_showMessage('Spawn protection for 10 seconds');
+
+                if (gt_spawnProtectionTimer) {
+                    clearTimeout(gt_spawnProtectionTimer);
+                    gt_spawnProtectionTimer = null;
+                }
+
+                gt_spawnProtectionTimer = setTimeout(function() {
+                    try {
+                        if (natives.doesVehicleExist(veh)) {
+                            natives.setCarCanBeDamaged(veh, !gt_vehicleGodMode);
+                            gt_showMessage('Spawn protection expired');
+                        }
+                    } catch (e) {} finally {
+                        gt_spawnProtectionTimer = null;
+                    }
+                }, 10000);
+            } catch (e) {
+                gt_showMessage('Spawn protection error');
+            }
+        } else if (gt_vehicleGodMode) {
+            try {
+                natives.setCarCanBeDamaged(veh, false);
+            } catch (e) {}
+        }
+
+        return veh;
+    } catch (e) {
+        gt_showMessage('Vehicle spawn failed: ' + e.message);
+        return null;
+    }
+}
+
+function gt_saveLocation(name) {
+    if (!localPlayer || !localPlayer.position) {
+        gt_showMessage('No player position');
+        return;
+    }
+    var p = localPlayer.position;
+    gt_savedLocations.push({
+        name: name,
+        pos: new Vec3(p.x, p.y, p.z)
+    });
+    gt_showMessage('Saved: ' + name);
+}
+
+function gt_applyWorldSettings() {
+    try {
+        // Time freeze / set time
+        if (!gt_timeFrozen) {
+            // Set the time once when changed; your environment may differ
+            natives.setTimeOfDay(gt_timeOfDay); // Example native; adjust if needed
+        }
+
+        // Cops
+        natives.setMaxWantedLevel(gt_disableCops ? 0 : 6);
+    } catch (e) {}
+}
+
+// ==========================
+//      VEHICLE LIST
+// ==========================
+
+var gt_vehicleModels = [
+   Here’s your GTA IV vehicle list converted to the format you requested for gt_vehicleModels. This is based on the IDs and names from the code you pasted earlier.
+
+var gt_vehicleModels = [
+    { name: 'Admiral',         id: 1264341792 },
+    { name: 'Airtug',          id: 1560980623 },
+    { name: 'Ambulance',       id: 1171614426 },
+    { name: 'Banshee',         id: -1041692462 },
+    { name: 'Benson',          id: 2053223216 },
+    { name: 'Biff',            id: 850991848 },
+    { name: 'Blista',          id: -344943009 },
+    { name: 'Bobcat',          id: 1075851868 },
+    { name: 'Boxville',        id: -1987130134 },
+    { name: 'Buccaneer',       id: -682211828 },
+    { name: 'Burrito',         id: -1346687836 },
+    { name: 'Burrito 2',       id: -907477130 },
+    { name: 'Bus',             id: -713569950 },
+    { name: 'Cabby',           id: 1884962369 },
+    { name: 'Cavalcade',       id: 2006918058 },
+    { name: 'Chavos',          id: -67282078 },
+    { name: 'Cognoscenti',     id: -30171296 },
+    { name: 'Comet',           id: 1063483177 },
+    { name: 'Coquette',        id: 108773431 },
+    { name: 'DF8',             id: 162883121 },
+    { name: 'Dilettante',      id: -1130810103 },
+    { name: 'Dukes',           id: 723973206 },
+    { name: 'E109',            id: -1971955454 },
+    { name: 'Emperor',         id: -685276541 },
+    { name: 'Rusty Emperor',   id: -1883002148 },
+    { name: 'Esperanto',       id: -276900515 },
+    { name: 'Faction',         id: -2119578145 },
+    { name: 'FIB Car',         id: 1127131465 },
+    { name: 'Feltzer',         id: -1097828879 },
+    { name: 'Feroci',          id: 974744810 },
+    { name: 'Airport Feroci',  id: 1026055242 },
+    { name: 'Firetruck',       id: 1938952078 },
+    { name: 'Flatbed',         id: 1353720154 },
+    { name: 'Fortune',         id: 627033353 },
+    { name: 'Forklift',        id: 1491375716 },
+    { name: 'Futo',            id: 2016857647 },
+    { name: 'FXT',             id: 675415136 },
+    { name: 'Habanero',        id: 884422927 },
+    { name: 'Hakumai',         id: -341892653 },
+    { name: 'Huntley',         id: 486987393 },
+    { name: 'Infernus',        id: 418536135 },
+    { name: 'Ingot',           id: -1289722222 },
+    { name: 'Intruder',        id: 886934177 },
+    { name: 'Landstalker',     id: 1269098716 },
+    { name: 'Lokus',           id: -37030056 },
+    { name: 'Manana',          id: -2124201592 },
+    { name: 'Marbella',        id: 1304597482 },
+    { name: 'Merit',           id: -1260881538 },
+    { name: 'Minivan',         id: -310465116 },
+    { name: 'Moonbeam',        id: 525509695 },
+    { name: 'Mr. Tasty',       id: 583100975 },
+    { name: 'Mule',            id: 904750859 },
+    { name: 'Noose Patrol Car',id: 148777611 },
+    { name: 'Noose Stockade',  id: 1911513875 },
+    { name: 'Oracle',          id: 1348744438 },
+    { name: 'Packer',          id: 569305213 },
+    { name: 'Patriot',         id: -808457413 },
+    { name: 'Perennial',       id: -2077743597 },
+    { name: 'Airport Perennial',id: -1590284256 },
+    { name: 'Peyote',          id: 1830407356 },
+    { name: 'Phantom',         id: -2137348917 },
+    { name: 'Pinnacle',        id: 131140572 },
+    { name: 'PMP-600',         id: 1376298265 },
+    { name: 'Police Cruiser',  id: 2046537925 },
+    { name: 'Police Patrol',   id: -1627000575 },
+    { name: 'Police Patriot',  id: -350085182 },
+    { name: 'Pony',            id: -119658072 },
+    { name: 'Premier',         id: -1883869285 },
+    { name: 'Presidente',      id: -1962071130 },
+    { name: 'Primo',           id: -1150599089 },
+    { name: 'Police Stockade', id: -1900572838 },
+    { name: 'Rancher',         id: 1390084576 },
+    { name: 'Rebla',           id: 83136452 },
+    { name: 'Reply',           id: -845979911 },
+    { name: 'Romero',          id: 627094268 },
+    { name: "Roman's Taxi",   id: -1932515764 },
+    { name: 'Ruiner',          id: -227741703 },
+    { name: 'Sabre',           id: -449022887 },
+    { name: 'Sabre 2',         id: 1264386590 },
+    { name: 'Sabre GT',        id: -1685021548 },
+    { name: 'Schafter',        id: -322343873 },
+    { name: 'Sentinel',        id: 1349725314 },
+    { name: 'Solair',          id: 1344573448 },
+    { name: 'Speedo',          id: -810318068 },
+    { name: 'Stallion',        id: 1923400478 },
+    { name: 'Steed',           id: 1677715180 },
+    { name: 'Stockade',        id: 1747439474 },
+    { name: 'Stratum',         id: 1723137093 },
+    { name: 'Stretch',         id: -1961627517 },
+    { name: 'Sultan',          id: 970598228 },
+    { name: 'Sultan RS',       id: -295689028 },
+    { name: 'Super GT',        id: 1821991593 },
+    { name: 'Taxi',            id: -956048545 },
+    { name: 'Taxi 2',          id: 1208856469 },
+    { name: 'Trashmaster',     id: 1917016601 },
+    { name: 'Turismo',         id: -1896659641 },
+    { name: 'Uranus',          id: 1534326199 },
+    { name: 'Vigero',          id: -825837129 },
+    { name: 'Vigero 2',        id: -1758379524 },
+    { name: 'Vincent',         id: -583281407 },
+    { name: 'Virgo',           id: -498054846 },
+    { name: 'Voodoo',          id: 2006667053 },
+    { name: 'Washington',      id: 1777363799 },
+    { name: 'Willard',         id: 1937616578 },
+    { name: 'Yankee',          id: -1099960214 },
+
+    // Bikes
+    { name: 'Bobber',          id: -1830458836 },
+    { name: 'Faggio',          id: -1842748181 },
+    { name: 'Hellfury',        id: 584879743 },
+    { name: 'NRG-900',         id: 1203311498 },
+    { name: 'PCJ-600',         id: -909201658 },
+    { name: 'Sanchez',         id: 788045382 },
+    { name: 'Zombie',          id: -570033273 },
+
+    // Helicopters
+    { name: 'Annihilator',     id: 837858166 },
+    { name: 'Maverick',        id: -1660661558 },
+    { name: 'Police Maverick', id: 353883353 },
+    { name: 'Tour Maverick',   id: 2027357303 },
+
+    // Boats
+    { name: 'Dinghy',          id: 1033245328 },
+    { name: 'Jetmax',          id: 861409633 },
+    { name: 'Marquis',         id: -1043459709 },
+    { name: 'Predator',        id: -488123221 },
+    { name: 'Reefer',          id: 1759673526 },
+    { name: 'Squalo',          id: 400514754 },
+    { name: 'Tuga',            id: 1064455782 },
+    { name: 'Tropic',          id: 290013743 },
+
+    // Trains / special
+    { name: 'Cablecar',        id: -960289747 },
+    { name: 'Subway',          id: 800869680 },
+    { name: 'El Train',        id: -1953988645 }
+];
+
+// ==========================
+//      UI CONSTRUCTION
+// ==========================
+
+function gt_buildWindow() {
+    if (!mexui || typeof toColour === 'undefined') {
+        gt_showMessage('mexui or toColour not available');
+        return;
+    }
+
+    try {
+        // Close previous window if exists
+        if (gt_window && gt_window.isShown()) {
+            gt_window.setShown(false);
+        }
+    } catch (e) {}
+
+    // Main style: darker, cleaner look
+    var styles = {
+        main: {
+            titleBarColour:  toColour(20, 20, 20, 240),
+            backgroundColour: toColour(15, 15, 15, 230),
+            textColour:      toColour(230, 230, 230, 255),
+            hover: {
+                backgroundColour: toColour(40, 80, 160, 220),
+                transitionTime: 200
+            }
+        }
+    };
+
+    try {
+        gt_window = mexui.window(450, 150, 500, 430, 'garglerTrainerV1', styles);
+        gt_window.setShown(false);
+        gt_window.center();
+    } catch (e) {
+        gt_showMessage('Error creating garglerTrainerV1 window');
+        return;
+    }
+
+    // Header: title + credits
+    try {
+        gt_window.text(10, 5, 480, 22, 'garglerTrainerV1', { align: 'center', textColour: toColour(120, 180, 255, 255) });
+        gt_window.text(10, 25, 480, 18, 'Made by Dexter – based on work by SirCryptic & GTA modding community', { align: 'center', textColour: toColour(180, 180, 180, 255) });
+    } catch (e) {}
+
+    // Tab buttons row
+    var tabNames = ['Vehicles', 'Player', 'World', 'Teleport', 'Fun'];
+    var tabKeys  = ['vehicles', 'player', 'world', 'teleport', 'fun'];
+
+    for (var i = 0; i < tabNames.length; i++) {
+        (function(i) {
+            try {
+                var x = 10 + (i * 95);
+                var tabBtn = gt_window.button(x, 50, 90, 25, tabNames[i], {}, function() {
+                    gt_activeTab = tabKeys[i];
+                    gt_refreshTab();
+                });
+            } catch (e) {}
+        })(i);
+    }
+
+    // Content area hint
+    try {
+        gt_window.text(10, 80, 480, 18, 'Press F3 to toggle this trainer. Tabs above switch categories.', { align: 'center', textColour: toColour(160, 160, 160, 255) });
+    } catch (e) {}
+
+    // Draw initial tab
+    gt_refreshTab();
+}
+
+// Simple helper to clear main content area by covering with text or re-creating elements.
+function gt_clearContentArea() {
+    // There is no direct "clear controls" in some mexui builds, so this is a conceptual space:
+    // - Place new controls below y = 105 always
+    // - Old controls remain, but you can visually override by placing new ones on top or reuse same positions.
+    // If your mexui has a way to remove controls, use that instead.
+}
+
+function gt_refreshTab() {
+    if (!gt_window) return;
+
+    gt_clearContentArea();
+
+    if (gt_activeTab === 'vehicles') {
+        gt_buildVehiclesTab();
+    } else if (gt_activeTab === 'player') {
+        gt_buildPlayerTab();
+    } else if (gt_activeTab === 'world') {
+        gt_buildWorldTab();
+    } else if (gt_activeTab === 'teleport') {
+        gt_buildTeleportTab();
+    } else if (gt_activeTab === 'fun') {
+        gt_buildFunTab();
+    }
+}
+
+// ==========================
+//      TAB: VEHICLES
+// ==========================
+
+function gt_buildVehiclesTab() {
+    // Vehicle spawner dropdown
+    var dropdown;
+    try {
+        dropdown = gt_window.dropDown(20, 110, 220, 25, 'Spawn Vehicle', {}, function() {
+            var idx = this.selectedEntryIndex;
+            if (idx < 0 || idx >= gt_vehicleModels.length) return;
+
+            var model = gt_vehicleModels[idx];
+            var pos   = gt_getPosInFrontOfPlayer(8.0);
+            if (!pos) return;
+
+            try {
+                if (gt_lastVehicle) {
+                    try {
+                        destroyElement(gt_lastVehicle);
+                        if (gt_spawnProtectionTimer) {
+                            clearTimeout(gt_spawnProtectionTimer);
+                            gt_spawnProtectionTimer = null;
+                        }
+                    } catch (e) {}
+                    gt_lastVehicle = null;
+                }
+
+                var veh = gt_createVehicle(model.id, pos, true);
+                if (veh) {
+                    natives.setCarHeading(veh, localPlayer.heading);
+
+                    if (natives.isThisModelACar(model.id) ||
+                        natives.isThisModelABike(model.id) ||
+                        natives.isThisModelAHeli(model.id) ||
+                        natives.isThisModelABoat(model.id)) {
+                        natives.warpCharIntoCar(localPlayer, veh);
+                        gt_showMessage('Spawned: ' + model.name);
+                    } else {
+                        gt_showMessage('Spawned: ' + model.name + ' (non-drivable)');
+                    }
+
+                    gt_lastVehicle = veh;
+                }
+            } catch (e) {
+                gt_showMessage('Spawn error');
+            }
+        });
+        for (var i = 0; i < gt_vehicleModels.length; i++) {
+            dropdown.item(gt_vehicleModels[i].name);
+        }
+    } catch (e) {}
+
+    // Quick vehicle actions: repair, flip, delete
+    try {
+        gt_window.button(260, 110, 70, 25, 'Repair', {}, function() {
+            gt_getPlayerVehicle(1, 5, 200, function(veh) {
+                if (!veh) return;
+                try {
+                    natives.fixCar(veh);
+                    gt_showMessage('Vehicle repaired');
+                } catch (e) {
+                    gt_showMessage('Repair error');
+                }
+            });
+        });
+
+        gt_window.button(335, 110, 70, 25, 'Flip', {}, function() {
+            gt_getPlayerVehicle(1, 5, 200, function(veh) {
+                if (!veh) return;
+                try {
+                    if (typeof natives.setCarOnGroundProperly !== 'undefined') {
+                        natives.setCarOnGroundProperly(veh);
+                    } else {
+                        var p = veh.position;
+                        natives.setCarHeading(veh, veh.heading);
+                        natives.setCarCoordinates(veh, p.x, p.y, p.z + 0.5);
+                    }
+                    gt_showMessage('Vehicle flipped');
+                } catch (e) {
+                    gt_showMessage('Flip error');
+                }
+            });
+        });
+
+        gt_window.button(410, 110, 70, 25, 'Delete', {}, function() {
+            gt_getPlayerVehicle(1, 5, 200, function(veh) {
+                if (!veh) return;
+                try {
+                    destroyElement(veh);
+                    if (veh === gt_lastVehicle) {
+                        if (gt_spawnProtectionTimer) {
+                            clearTimeout(gt_spawnProtectionTimer);
+                            gt_spawnProtectionTimer = null;
+                        }
+                        gt_lastVehicle = null;
+                    }
+                    gt_showMessage('Vehicle deleted');
+                } catch (e) {
+                    gt_showMessage('Delete error');
+                }
+            });
+        });
+    } catch (e) {}
+
+    // Toggles row 1: Vehicle God Mode, Spawn Protection, Speed Boost
+    try {
+        var vgm = gt_window.checkBox(20, 150, 20, 20, '', {}, function() {
+            gt_vehicleGodMode = this.checked;
+            gt_getPlayerVehicle(1, 5, 200, function(veh) {
+                if (!veh) return;
+                try {
+                    natives.setCarCanBeDamaged(veh, !gt_vehicleGodMode);
+                    gt_showMessage('Vehicle God Mode ' + (gt_vehicleGodMode ? 'ON' : 'OFF'));
+                } catch (e) {
+                    gt_showMessage('Vehicle GM error');
+                }
+            });
+        });
+        vgm.checked = gt_vehicleGodMode;
+        gt_window.text(45, 150, 130, 20, 'Vehicle God Mode', {});
+
+        var sp = gt_window.checkBox(20, 175, 20, 20, '', {}, function() {
+            gt_spawnProtectionOn = this.checked;
+            gt_showMessage('Spawn Protection ' + (gt_spawnProtectionOn ? 'ON' : 'OFF'));
+        });
+        sp.checked = gt_spawnProtectionOn;
+        gt_window.text(45, 175, 160, 20, 'Spawn Protection (10s)', {});
+
+        var sb = gt_window.checkBox(20, 200, 20, 20, '', {}, function() {
+            gt_speedBoostEnabled = this.checked;
+            gt_getPlayerVehicle(1, 5, 200, function(veh) {
+                if (!veh) return;
+                try {
+                    var mult = gt_speedBoostEnabled ? 2.0 : 1.0;
+                    // Adjust native name if needed
+                    natives.setCarEnginePowerMultiplier(veh, mult);
+                    gt_showMessage('Speed Boost ' + (gt_speedBoostEnabled ? 'ON' : 'OFF'));
+                } catch (e) {
+                    gt_showMessage('Speed Boost error');
+                }
+            });
+        });
+        sb.checked = gt_speedBoostEnabled;
+        gt_window.text(45, 200, 160, 20, 'Speed Boost', {});
+    } catch (e) {}
+
+    // Simple color presets (primary color index examples)
+    try {
+        gt_window.button(260, 150, 100, 25, 'Color: Sport', {}, function() {
+            gt_getPlayerVehicle(1, 5, 200, function(veh) {
+                if (!veh) return;
+                try {
+                    veh.colour1 = 0;  // example color indices
+                    veh.colour2 = 1;
+                    gt_showMessage('Sport colors set');
+                } catch (e) {
+                    gt_showMessage('Color error');
+                }
+            });
+        });
+
+        gt_window.button(370, 150, 100, 25, 'Color: Stealth', {}, function() {
+            gt_getPlayerVehicle(1, 5, 200, function(veh) {
+                if (!veh) return;
+                try {
+                    veh.colour1 = 6;
+                    veh.colour2 = 6;
+                    gt_showMessage('Stealth colors set');
+                } catch (e) {
+                    gt_showMessage('Color error');
+                }
+            });
+        });
+
+        gt_window.button(260, 180, 100, 25, 'Wash Vehicle', {}, function() {
+            gt_getPlayerVehicle(1, 5, 200, function(veh) {
+                if (!veh) return;
+                try {
+                    natives.setVehicleDirtLevel(veh, 0);
+                    gt_showMessage('Vehicle cleaned');
+                } catch (e) {
+                    gt_showMessage('Wash error');
+                }
+            });
+        });
+    } catch (e) {}
+}
+
+// ==========================
+//      TAB: PLAYER
+// ==========================
+
+function gt_buildPlayerTab() {
+    // God mode, armor, movement
+    try {
+        var pgm = gt_window.checkBox(20, 110, 20, 20, '', {}, function() {
+            gt_playerGodMode = this.checked;
+            if (!localPlayer) return;
+            try {
+                natives.setCharInvincible(localPlayer, gt_playerGodMode);
+                gt_showMessage('Player God Mode ' + (gt_playerGodMode ? 'ON' : 'OFF'));
+            } catch (e) {
+                gt_showMessage('PGM error');
+            }
+        });
+        pgm.checked = gt_playerGodMode;
+        gt_window.text(45, 110, 150, 20, 'Player God Mode', {});
+
+        var fr = gt_window.checkBox(20, 135, 20, 20, '', {}, function() {
+            gt_fastRun = this.checked;
+            try {
+                natives.setRunSpeed(localPlayer, gt_fastRun ? 1.6 : 1.0); // example native
+                gt_showMessage('Fast Run ' + (gt_fastRun ? 'ON' : 'OFF'));
+            } catch (e) {}
+        });
+        fr.checked = gt_fastRun;
+        gt_window.text(45, 135, 150, 20, 'Fast Run', {});
+
+        var sj = gt_window.checkBox(20, 160, 20, 20, '', {}, function() {
+            gt_superJump = this.checked;
+            // Actual jump modification may need different natives / logic
+            gt_showMessage('Super Jump ' + (gt_superJump ? 'ON' : 'OFF'));
+        });
+        sj.checked = gt_superJump;
+        gt_window.text(45, 160, 150, 20, 'Super Jump (experimental)', {});
+
+        var nr = gt_window.checkBox(20, 185, 20, 20, '', {}, function() {
+            gt_noRagdoll = this.checked;
+            // Implementation may vary; you might use native flags
+            gt_showMessage('No Ragdoll ' + (gt_noRagdoll ? 'ON' : 'OFF'));
+        });
+        nr.checked = gt_noRagdoll;
+        gt_window.text(45, 185, 150, 20, 'No Ragdoll', {});
+    } catch (e) {}
+
+    // Health / armor buttons
+    try {
+        gt_window.button(260, 110, 100, 25, 'Heal', {}, function() {
+            if (!localPlayer) return;
+            try {
+                natives.setCharHealth(localPlayer, 200);
+                gt_showMessage('Healed');
+            } catch (e) {}
+        });
+
+        gt_window.button(370, 110, 100, 25, 'Give Armor', {}, function() {
+            if (!localPlayer) return;
+            try {
+                natives.addArmourToChar(localPlayer, 100);
+                gt_showMessage('Armor added');
+            } catch (e) {}
+        });
+    } catch (e) {}
+
+    // Weapons toggles – infinite ammo / no reload
+    try {
+        var ia = gt_window.checkBox(260, 150, 20, 20, '', {}, function() {
+            gt_infiniteAmmo = this.checked;
+            gt_showMessage('Infinite Ammo ' + (gt_infiniteAmmo ? 'ON' : 'OFF'));
+        });
+        ia.checked = gt_infiniteAmmo;
+        gt_window.text(285, 150, 150, 20, 'Infinite Ammo', {});
+
+        var nrld = gt_window.checkBox(260, 175, 20, 20, '', {}, function() {
+            gt_noReload = this.checked;
+            gt_showMessage('No Reload ' + (gt_noReload ? 'ON' : 'OFF'));
+        });
+        nrld.checked = gt_noReload;
+        gt_window.text(285, 175, 150, 20, 'No Reload', {});
+
+        gt_window.button(260, 205, 100, 25, 'Give Loadout', {}, function() {
+            if (!localPlayer) return;
+            try {
+                // Example: pistol, SMG, rifle; adjust IDs to your environment
+                natives.giveWeaponToChar(localPlayer, 22, 9999); // pistol
+                natives.giveWeaponToChar(localPlayer, 28, 9999); // SMG
+                natives.giveWeaponToChar(localPlayer, 30, 9999); // rifle
+                gt_showMessage('Standard loadout given');
+            } catch (e) {
+                gt_showMessage('Loadout error');
+            }
+        });
+    } catch (e) {}
+}
+
+// ==========================
+//      TAB: WORLD
+// ==========================
+
+function gt_buildWorldTab() {
+    // Time controls
+    try {
+        var tf = gt_window.checkBox(20, 110, 20, 20, '', {}, function() {
+            gt_timeFrozen = this.checked;
+            gt_showMessage('Time Freeze ' + (gt_timeFrozen ? 'ON' : 'OFF'));
+        });
+        tf.checked = gt_timeFrozen;
+        gt_window.text(45, 110, 150, 20, 'Freeze Time', {});
+
+        gt_window.button(20, 140, 90, 25, 'Morning', {}, function() {
+            gt_timeOfDay = 8;
+            gt_applyWorldSettings();
+            gt_showMessage('Time set: Morning');
+        });
+        gt_window.button(115, 140, 90, 25, 'Noon', {}, function() {
+            gt_timeOfDay = 12;
+            gt_applyWorldSettings();
+            gt_showMessage('Time set: Noon');
+        });
+        gt_window.button(210, 140, 90, 25, 'Evening', {}, function() {
+            gt_timeOfDay = 18;
+            gt_applyWorldSettings();
+            gt_showMessage('Time set: Evening');
+        });
+        gt_window.button(305, 140, 90, 25, 'Midnight', {}, function() {
+            gt_timeOfDay = 0;
+            gt_applyWorldSettings();
+            gt_showMessage('Time set: Midnight');
+        });
+    } catch (e) {}
+
+    // Cops toggle
+    try {
+        var cops = gt_window.checkBox(20, 180, 20, 20, '', {}, function() {
+            gt_disableCops = this.checked;
+            gt_applyWorldSettings();
+            gt_showMessage('Cops ' + (gt_disableCops ? 'Disabled' : 'Enabled'));
+        });
+        cops.checked = gt_disableCops;
+        gt_window.text(45, 180, 150, 20, 'Disable Cops', {});
+    } catch (e) {}
+
+    // Weather – NOTE: adjust natives to your hook if different
+    try {
+        gt_window.button(20, 220, 90, 25, 'Clear', {}, function() {
+            try {
+                natives.forceWeatherNow(0); // clear; example
+                gt_showMessage('Weather: Clear');
+            } catch (e) {}
+        });
+        gt_window.button(115, 220, 90, 25, 'Cloudy', {}, function() {
+            try {
+                natives.forceWeatherNow(1);
+                gt_showMessage('Weather: Cloudy');
+            } catch (e) {}
+        });
+        gt_window.button(210, 220, 90, 25, 'Rainy', {}, function() {
+            try {
+                natives.forceWeatherNow(3);
+                gt_showMessage('Weather: Rainy');
+            } catch (e) {}
+        });
+        gt_window.button(305, 220, 90, 25, 'Storm', {}, function() {
+            try {
+                natives.forceWeatherNow(4);
+                gt_showMessage('Weather: Storm');
+            } catch (e) {}
+        });
+    } catch (e) {}
+}
+
+// ==========================
+//      TAB: TELEPORT
+// ==========================
+
+function gt_buildTeleportTab() {
+    var locDropdown;
+
+    try {
+        gt_window.button(20, 110, 150, 25, 'Teleport to Waypoint', {}, function() {
+            try {
+                var blipId = natives.getFirstBlipInfoId(8);
+                if (!blipId) {
+                    gt_showMessage('No waypoint set');
+                    return;
+                }
+                var wp = natives.getBlipCoords(blipId);
+                if (!wp || isNaN(wp.x) || isNaN(wp.y) || isNaN(wp.z)) {
+                    gt_showMessage('Invalid waypoint');
+                    return;
+                }
+                if (localPlayer.vehicle) {
+                    localPlayer.vehicle.position = wp;
+                } else {
+                    localPlayer.position = wp;
+                }
+                gt_showMessage('Teleported to waypoint');
+            } catch (e) {
+                gt_showMessage('Teleport error');
+            }
+        });
+    } catch (e) {}
+
+    try {
+        locDropdown = gt_window.dropDown(20, 150, 220, 25, 'Saved Locations', {}, function() {
+            var idx = this.selectedEntryIndex;
+            if (idx < 0 || idx >= gt_savedLocations.length) return;
+            var loc = gt_savedLocations[idx];
+            try {
+                if (localPlayer.vehicle) {
+                    localPlayer.vehicle.position = loc.pos;
+                } else {
+                    localPlayer.position = loc.pos;
+                }
+                gt_showMessage('Teleported to ' + loc.name);
+            } catch (e) {
+                gt_showMessage('Teleport error');
+            }
+        });
+
+        // Initial fill
+        for (var i = 0; i < gt_savedLocations.length; i++) {
+            locDropdown.item(gt_savedLocations[i].name);
+        }
+    } catch (e) {}
+
+    try {
+        gt_window.button(260, 150, 100, 25, 'Save Here', {}, function() {
+            var name = 'Location ' + (gt_savedLocations.length + 1);
+            gt_saveLocation(name);
+            try {
+                locDropdown.clearItems();
+                for (var i = 0; i < gt_savedLocations.length; i++) {
+                    locDropdown.item(gt_savedLocations[i].name);
+                }
+            } catch (e) {}
+        });
+
+        gt_window.button(370, 150, 100, 25, 'Delete Last', {}, function() {
+            if (gt_savedLocations.length === 0) return;
+            var removed = gt_savedLocations.pop();
+            gt_showMessage('Removed: ' + removed.name);
+            try {
+                locDropdown.clearItems();
+                for (var i = 0; i < gt_savedLocations.length; i++) {
+                    locDropdown.item(gt_savedLocations[i].name);
+                }
+            } catch (e) {}
+        });
+    } catch (e) {}
+}
+
+// ==========================
+//      TAB: FUN
+// ==========================
+
+function gt_buildFunTab() {
+    // Simple ragdoll self button
+    try {
+        gt_window.button(20, 110, 120, 25, 'Ragdoll Self', {}, function() {
+            if (!localPlayer) return;
+            try {
+                natives.setPedToRagdoll(localPlayer, 5000, 5000, 0, true, true, false); // example
+                gt_showMessage('Ragdoll!');
+            } catch (e) {}
+        });
+    } catch (e) {}
+
+    // Gravity presets – adjust to real natives for your hook
+    try {
+        gt_window.button(20, 150, 120, 25, 'Low Gravity', {}, function() {
+            try {
+                natives.setGravityLevel(0.5); // example
+                gt_showMessage('Low gravity');
+            } catch (e) {}
+        });
+
+        gt_window.button(150, 150, 120, 25, 'Normal Gravity', {}, function() {
+            try {
+                natives.setGravityLevel(1.0);
+                gt_showMessage('Normal gravity');
+            } catch (e) {}
+        });
+    } catch (e) {}
+
+    // Super punch – conceptual, depends on your native set
+    try {
+        gt_window.button(20, 190, 120, 25, 'Toggle Super Punch', {}, function() {
+            gt_showMessage('Super Punch is a conceptual example – implement with your own natives');
+        });
+    } catch (e) {}
+}
+
+// ==========================
+//   CONTINUOUS CHECKS
+// ==========================
+
+function gt_startWatchdog() {
+    if (gt_weaponCheckTimer) return;
+
+    gt_weaponCheckTimer = setInterval(function() {
+        try {
+            if (!localPlayer) return;
+
+            // Player God Mode (extra safety)
+            if (gt_playerGodMode) {
+                natives.setCharInvincible(localPlayer, true);
+            }
+
+            // Infinite ammo / no reload – exact implementation depends on your natives
+            if (gt_infiniteAmmo || gt_noReload) {
+                // Example: keep ammo topped up
+                var weaponTypes = [22, 28, 30, 31, 32, 33, 34];
+                for (var i = 0; i < weaponTypes.length; i++) {
+                    natives.setCharAmmo(localPlayer, weaponTypes[i], 9999);
+                }
+            }
+
+            // Vehicle God Mode: keep car invincible
+            if (gt_vehicleGodMode && localPlayer.vehicle) {
+                natives.setCarCanBeDamaged(localPlayer.vehicle, false);
+            }
+        } catch (e) {}
+    }, 200);
+}
+
+// ==========================
+//      INIT & KEYBIND
+// ==========================
+
+garglerTrainerV1.init = function() {
+    function tryInit(attempts, maxAttempts, delay) {
+        if (attempts > maxAttempts) {
+            gt_showMessage('garglerTrainerV1: failed to init (mexui missing)');
+            return;
+        }
+
+        if (typeof mexui === 'undefined' || !mexui || typeof toColour === 'undefined') {
+            setTimeout(function() {
+                tryInit(attempts + 1, maxAttempts, delay);
+            }, delay);
+            return;
+        }
+
+        // Detect Free Mode if available (same logic style as your old script)
+        try {
+            if (typeof gta !== 'undefined' && typeof gta.ivGamemode !== 'undefined') {
+                var gm = gta.ivGamemode;
+                gt_isFreeMode = (gm === 16 || gm === '16');
+                gt_showMessage('Free Mode: ' + (gt_isFreeMode ? 'Yes' : 'No') + ' (GM: ' + gm + ')');
+            } else {
+                throw new Error('ivGamemode not defined');
+            }
+        } catch (e) {
+            gt_isFreeMode = false;
+            gt_showMessage('Gamemode unknown; trainer may be limited');
+        }
+
+        // Build UI window
+        gt_buildWindow();
+
+        // Bind F3 to toggle
+        try {
+            bindKey(SDLK_F3, KEYSTATE_DOWN, function() {
+                if (!localPlayer) {
+                    gt_showMessage('No local player');
+                    return;
+                }
+                if (!gt_window) {
+                    gt_buildWindow();
+                }
+                var show = !gt_window.isShown();
+                mexui.setInput(show);
+                gt_window.setShown(show);
+                if (show) gt_window.center();
+            });
+        } catch (e) {
+            gt_showMessage('Failed to bind F3');
+        }
+
+        // Start watchdog
+        gt_startWatchdog();
+
+        gt_showMessage('garglerTrainerV1 loaded – press F3 to open');
+    }
+
+    tryInit(1, 10, 500);
+};
+
+garglerTrainerV1.init();
